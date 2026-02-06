@@ -151,18 +151,26 @@ def execute(filters=None):
 	if not filters:
 		filters = {}
 
-	# Note: period filter is deprecated - we now use dynamic dates from GL entries
-	period = filters.get("budget_period", "งบ 69-70")
+	# Get the period filter - now in Gregorian year format
+	period = filters.get("budget_period")
 
-	PERIOD_SHIFT = {
-		"งบ 69-70": 0,
-		"งบ 70-71": 2,
-		"งบ 71-72": 4,
-		"งบ 72-73": 6,
-		"งบ 73-74": 8,
-	}
+	# Parse Gregorian year range from period string (e.g., "2024-2025 (งบ 70-71)" → years 2024-2025)
+	filtered_years = None
+	if period and period != "All Years":
+		try:
+			# Extract Gregorian years from "2024-2025 (...)" format
+			import re
 
-	shift_year = PERIOD_SHIFT.get(period, 0)
+			match = re.search(r"(\d{4})-(\d{4})", period)
+			if match:
+				gregorian_start = int(match.group(1))
+				gregorian_end = int(match.group(2))
+				filtered_years = (gregorian_start, gregorian_end)
+				frappe.logger().info(
+					f"[FILTER] Budget period: {period} → Gregorian years {gregorian_start}-{gregorian_end}"
+				)
+		except Exception as e:
+			frappe.logger().warning(f"[FILTER] Error parsing period '{period}': {e}")
 
 	# ---------------------------------------------------------
 	# 🔵 TEMPLATE GROUPS
@@ -187,76 +195,24 @@ def execute(filters=None):
 		return tuple(lst) if len(lst) > 1 else (lst[0], lst[0])
 
 	# ---------------------------------------------------------
-	# 🟡 รายชื่อ TAG
+	# 🟡 Get professor tags dynamically from GL Entry accounts
 	# ---------------------------------------------------------
-	PROFESSOR_TAGS = [
-		"AS",
-		"WI",
-		"WW",
-		"KG",
-		"ST",
-		"RC",
-		"WL",
-		"SR",
-		"WR",
-		"CN",
-		"CB",
-		"WP",
-		"US",
-		"AC",
-		"KR",
-		"WS",
-		"SN",
-		"NR",
-		"CS",
-		"PC",
-		"AL",
-		"WM",
-		"TP",
-		"RP",
-		"KP",
-		"AB",
-		"PO",
-		"TO",
-		"PM",
-		"ND",
-		"NP",
-	]
-
-	# Keep these as fallback in case no GL entries exist
-	cycle_dates = {
-		"AS": ("2025-11-15", "2027-11-14"),
-		"WI": ("2024-03-07", "2026-03-06"),
-		"WW": ("2025-11-15", "2027-11-14"),
-		"KG": ("2025-11-13", "2027-11-12"),
-		"ST": ("2025-12-03", "2027-12-02"),
-		"RC": ("2025-04-07", "2027-04-06"),
-		"WL": ("2024-03-07", "2026-03-06"),
-		"SR": ("2024-09-05", "2026-09-04"),
-		"WR": ("2024-11-15", "2026-11-14"),
-		"CN": ("2024-12-08", "2026-12-07"),
-		"CB": ("2025-09-14", "2027-09-13"),
-		"WP": ("2024-03-17", "2026-03-16"),
-		"US": ("2024-11-09", "2026-11-08"),
-		"AC": ("2024-11-15", "2026-11-14"),
-		"KR": ("2024-11-15", "2026-11-14"),
-		"WS": ("2024-03-07", "2026-03-06"),
-		"SN": ("2025-11-15", "2027-11-14"),
-		"NR": ("2024-11-19", "2026-11-18"),
-		"CS": ("2025-10-29", "2027-10-28"),
-		"PC": ("2025-11-15", "2027-11-14"),
-		"AL": ("2025-09-15", "2027-09-14"),
-		"WM": ("2025-03-03", "2027-03-02"),
-		"TP": ("2025-05-05", "2027-05-04"),
-		"RP": ("2025-12-13", "2027-12-12"),
-		"KP": ("2025-03-26", "2027-03-25"),
-		"AB": ("2025-01-13", "2027-01-12"),
-		"PO": ("2024-11-16", "2026-11-15"),
-		"TO": ("2024-06-10", "2026-06-09"),
-		"PM": ("2025-03-16", "2027-03-15"),
-		"ND": ("2024-11-10", "2026-11-09"),
-		"NP": ("2025-05-06", "2027-05-05"),
-	}
+	sql_get_tags = """
+		SELECT DISTINCT 
+			SUBSTRING_INDEX(gle.account, ' ', 1) as tag
+		FROM `tabGL Entry` gle
+		WHERE 
+			gle.is_cancelled = 0
+			AND gle.account LIKE '% Travel - IE%'
+			AND SUBSTRING_INDEX(gle.account, ' ', 1) != 'IE'
+		ORDER BY tag ASC
+	"""
+	tag_results = frappe.db.sql(sql_get_tags, as_dict=1)
+	PROFESSOR_TAGS = [row.get("tag") for row in tag_results if row.get("tag")]
+	
+	if not PROFESSOR_TAGS:
+		frappe.logger().warning("[REPORT] No professor tags found in GL Entry")
+		return columns, [], None, {}
 
 	columns = [
 		{"label": "อาจารย์ (Tag)", "fieldname": "professor", "fieldtype": "Data", "width": 100},
@@ -417,7 +373,46 @@ def execute(filters=None):
 				else:
 					row[field_name] = ""
 
-			data.append(row)
+			# 🔥 Apply budget_period filter if set
+			if filtered_years:
+				# Extract year range from cycle_period (e.g., "01/08/24 - 31/07/26" → 24-26)
+				cycle_period_str = row.get("cycle_period", "")
+				try:
+					period_parts = cycle_period_str.split(" - ")
+					if len(period_parts) == 2:
+						start_date_str = period_parts[0]  # "DD/MM/YY"
+						end_date_str = period_parts[1]  # "DD/MM/YY"
+
+						# Extract years
+						start_year_str = start_date_str.split("/")[2]  # "YY"
+						end_year_str = end_date_str.split("/")[2]  # "YY"
+
+						start_year_greg = int(start_year_str) + 2000
+						end_year_greg = int(end_year_str) + 2000
+
+						# Check if this period's year range matches the filtered years
+						# For "24-26" period to match filter "70-71" (2026-2027):
+						# The period should contain those years (24-26 contains 26)
+						year_start, year_end = filtered_years
+
+						# Period matches if it overlaps with filtered range
+						if start_year_greg <= year_end and end_year_greg >= year_start:
+							data.append(row)
+							frappe.logger().debug(
+								f"[FILTER] Including {prof_tag} {cycle_period_str} ({start_year_greg}-{end_year_greg} overlaps {year_start}-{year_end})"
+							)
+						else:
+							frappe.logger().debug(
+								f"[FILTER] Excluding {prof_tag} {cycle_period_str} ({start_year_greg}-{end_year_greg} doesn't overlap {year_start}-{year_end})"
+							)
+				except Exception as e:
+					frappe.logger().warning(
+						f"[FILTER] Error parsing cycle_period '{cycle_period_str}': {e}, appending anyway"
+					)
+					data.append(row)
+			else:
+				# No filter - include all rows
+				data.append(row)
 
 	# Log final summary
 	frappe.logger().info("\n" + "=" * 100)

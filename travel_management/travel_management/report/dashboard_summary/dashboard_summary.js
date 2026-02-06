@@ -4,34 +4,37 @@ frappe.query_reports["Dashboard summary"] = {
             "fieldname": "budget_period",
             "label": __("ช่วงงบประมาณ"),
             "fieldtype": "Select",
-            "default": "งบ 69-70",
+            "default": "All Years",
             "options": "" 
         }
     ],
 
     "onload": function (report) {
         // -------------------------------------------------
-        // 1. สร้างตัวเลือกปีอัตโนมัติ (Dropdown Only)
+        // Create filter options with Gregorian years
+        // (Convert Thai year to Gregorian: Thai 69 = Gregorian 2023, Thai 70 = Gregorian 2024, etc.)
         // -------------------------------------------------
-        let start_year = 69;
-        let end_year = 90; // อยากได้ถึงปีไหน แก้เลขตรงนี้ได้เลย
+        let start_year = 2023;  // Thai year 69
+        let end_year = 2041;    // Thai year 87 (can adjust as needed)
 
-        let options_str = "";
+        let options_str = "All Years\n";  // 🔥 Add "All Years" option
 
         for (let y = start_year; y < end_year; y++) {
             let next_y = y + 1;
-            let p_name = `งบ ${y}-${next_y}`;
+            let thai_year_start = y - 1954;  // Convert back to Thai year for display
+            let thai_year_end = next_y - 1954;
+            let p_name = `${y}-${next_y} (งบ ${thai_year_start}-${thai_year_end})`;
             options_str += p_name + "\n";
         }
 
-        // 2. อัปเดตตัวเลือกเข้าไปใน Dropdown
+        // Update filter options
         let filter_field = report.page.fields_dict['budget_period'];
         if (filter_field) {
             filter_field.df.options = options_str;
             filter_field.refresh(); 
         }
 
-        // 3. 🧹 คลีนปุ่ม: ลบปุ่มกดด้านบนทิ้งให้หมด (จะได้ไม่รก)
+        // 🧹 Remove extra buttons for cleaner UI
         report.page.inner_toolbar.find('.btn-xs').remove();
     }
 };
