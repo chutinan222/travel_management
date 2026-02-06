@@ -1,4 +1,3 @@
-__version__ = "0.0.1"
 import frappe
 from datetime import datetime
 
@@ -12,23 +11,23 @@ def verify_professor_dates():
 
 	# Query all professors with Travel accounts
 	sql = """
-		SELECT 
-			SUBSTRING_INDEX(account, ' ', 1) as professor,
-			account,
-			MIN(posting_date) as first_transfer,
-			MAX(posting_date) as last_transfer,
-			COUNT(*) as entry_count,
-			ROUND(SUM(CASE WHEN debit > 0 THEN debit ELSE 0 END), 2) as total_debit,
-			ROUND(SUM(CASE WHEN credit > 0 THEN credit ELSE 0 END), 2) as total_credit
-		FROM `tabGL Entry`
-		WHERE 
-			is_cancelled = 0
-			AND account LIKE '%Travel - IE%'
-		GROUP BY 
-			SUBSTRING_INDEX(account, ' ', 1),
-			account
-		ORDER BY professor
-	"""
+        SELECT 
+            SUBSTRING_INDEX(account, ' ', 1) as professor,
+            account,
+            MIN(posting_date) as first_transfer,
+            MAX(posting_date) as last_transfer,
+            COUNT(*) as entry_count,
+            ROUND(SUM(CASE WHEN debit > 0 THEN debit ELSE 0 END), 2) as total_debit,
+            ROUND(SUM(CASE WHEN credit > 0 THEN credit ELSE 0 END), 2) as total_credit
+        FROM `tabGL Entry`
+        WHERE 
+            is_cancelled = 0
+            AND account LIKE '%Travel - IE%'
+        GROUP BY 
+            SUBSTRING_INDEX(account, ' ', 1),
+            account
+        ORDER BY professor
+    """
 
 	results = frappe.db.sql(sql, as_dict=1)
 

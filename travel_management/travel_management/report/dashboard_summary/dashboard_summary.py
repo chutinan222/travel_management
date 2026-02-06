@@ -1,8 +1,12 @@
 # Copyright (c) 2026, Administrator and contributors
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import frappe
-from frappe.utils import flt
+from frappe.utils import flt, getdate
+import logging
+
+# Setup logging for debugging
+logger = logging.getLogger(__name__)
 
 
 def add_years(date_obj, years):
@@ -12,10 +16,142 @@ def add_years(date_obj, years):
 		return date_obj.replace(month=2, day=28, year=date_obj.year + years)
 
 
+def get_first_transfer_date(tag):
+	"""
+	Get the first money transfer date (debit > 0) for a professor tag
+	from the GL Entry that matches the Travel - IE account
+	"""
+	# Build the pattern in Python to avoid % conflicts
+	pattern = f"%{tag} Travel%"
+	sql = """
+		SELECT MIN(gle.posting_date) as first_transfer_date
+		FROM `tabGL Entry` gle
+		WHERE 
+			gle.is_cancelled = 0
+			AND gle.debit > 0
+			AND gle.account LIKE %s
+	"""
+	result = frappe.db.sql(sql, (pattern,), as_dict=1)
+	if result and result[0].get("first_transfer_date"):
+		return getdate(result[0]["first_transfer_date"])
+	return None
+
+
+def get_all_transfer_dates(tag):
+	"""
+	Get all money transfer dates (debit > 0) for a professor tag
+	Returns them in chronological order
+	"""
+	# Build the pattern in Python to avoid % conflicts
+	pattern = f"%{tag} Travel%"
+	sql = """
+		SELECT DISTINCT gle.posting_date
+		FROM `tabGL Entry` gle
+		WHERE 
+			gle.is_cancelled = 0
+			AND gle.debit > 0
+			AND gle.account LIKE %s
+		ORDER BY gle.posting_date ASC
+	"""
+	result = frappe.db.sql(sql, (pattern,), as_dict=1)
+	return [getdate(row["posting_date"]) for row in result]
+
+
+def calculate_validity_periods(tag):
+	"""
+	Calculate validity periods based on money transfers
+
+	Rules:
+	1. First transfer date starts the first 2-year period
+	2. If a new transfer happens WITHIN the period, create a NEW period starting when current period ENDS
+	3. Each transfer gets its own 2-year validity period (separate, not extended)
+	4. Return list of (start_date, end_date) tuples
+	"""
+	transfer_dates = get_all_transfer_dates(tag)
+
+	# Log the transfer dates found
+	frappe.logger().info(f"[VALIDITY] Tag: {tag} - Found {len(transfer_dates)} transfer dates")
+	if transfer_dates:
+		frappe.logger().info(
+			f"[VALIDITY] Tag: {tag} - Dates: {[d.strftime('%Y-%m-%d') for d in transfer_dates]}"
+		)
+
+	if not transfer_dates:
+		frappe.logger().warning(f"[VALIDITY] Tag: {tag} - No transfer dates found, returning empty periods")
+		return []
+
+	periods = []
+	current_start = transfer_dates[0]
+	current_trigger = transfer_dates[0]  # 🔥 Track which transfer triggers this period
+	# 🔥 Valid for 2 years - 1 day (as per business rule)
+	current_end = add_years(current_start, 2) - timedelta(days=1)
+
+	frappe.logger().info(
+		f"[VALIDITY] Tag: {tag} - Period 1 initialized: {current_start.strftime('%Y-%m-%d')} to {current_end.strftime('%Y-%m-%d')} [Triggered by: {current_trigger.strftime('%Y-%m-%d')}]"
+	)
+
+	# Process each subsequent transfer date
+	for i, transfer_date in enumerate(transfer_dates[1:], 1):
+		frappe.logger().debug(
+			f"[VALIDITY] Tag: {tag} - Processing transfer {i + 1}: {transfer_date.strftime('%Y-%m-%d')}"
+		)
+
+		if transfer_date <= current_end:
+			# Mid-period transfer: Save current period and create NEW period starting when current ends
+			frappe.logger().info(
+				f"[VALIDITY] Tag: {tag} - 🔴 MID-PERIOD TRANSFER! Transfer {transfer_date.strftime('%Y-%m-%d')} is within period (ends {current_end.strftime('%Y-%m-%d')})"
+			)
+			frappe.logger().info(
+				f"[VALIDITY] Tag: {tag} - Saving period: {current_start.strftime('%Y-%m-%d')} to {current_end.strftime('%Y-%m-%d')} [Triggered by: {current_trigger.strftime('%Y-%m-%d')}]"
+			)
+
+			periods.append((current_start, current_end, current_trigger))
+
+			# NEW period starts the day AFTER current period ends
+			current_start = current_end + timedelta(days=1)
+			current_trigger = transfer_date  # 🔥 This transfer triggers the new period
+			current_end = add_years(current_start, 2) - timedelta(days=1)
+
+			frappe.logger().info(
+				f"[VALIDITY] Tag: {tag} - New period for transfer {transfer_date.strftime('%Y-%m-%d')}: {current_start.strftime('%Y-%m-%d')} to {current_end.strftime('%Y-%m-%d')}"
+			)
+		else:
+			# Transfer after current period - save current and start new
+			frappe.logger().info(
+				f"[VALIDITY] Tag: {tag} - Transfer {transfer_date.strftime('%Y-%m-%d')} is AFTER period ends"
+			)
+			frappe.logger().info(
+				f"[VALIDITY] Tag: {tag} - Saving period: {current_start.strftime('%Y-%m-%d')} to {current_end.strftime('%Y-%m-%d')} [Triggered by: {current_trigger.strftime('%Y-%m-%d')}]"
+			)
+
+			periods.append((current_start, current_end, current_trigger))
+			current_start = transfer_date
+			current_trigger = transfer_date  # 🔥 This transfer triggers the new period
+			current_end = add_years(current_start, 2) - timedelta(days=1)
+
+			frappe.logger().info(
+				f"[VALIDITY] Tag: {tag} - New period started: {current_start.strftime('%Y-%m-%d')} to {current_end.strftime('%Y-%m-%d')}"
+			)
+
+	# Add the last period
+	periods.append((current_start, current_end, current_trigger))
+	frappe.logger().info(
+		f"[VALIDITY] Tag: {tag} - Final period added: {current_start.strftime('%Y-%m-%d')} to {current_end.strftime('%Y-%m-%d')} [Triggered by: {current_trigger.strftime('%Y-%m-%d')}]"
+	)
+	frappe.logger().info(f"[VALIDITY] Tag: {tag} - Total periods: {len(periods)}")
+	for idx, (start, end, trigger) in enumerate(periods, 1):
+		frappe.logger().info(
+			f"[VALIDITY] Tag: {tag} - Period {idx}: {start.strftime('%Y-%m-%d')} → {end.strftime('%Y-%m-%d')} [Triggered by: {trigger.strftime('%Y-%m-%d')}]"
+		)
+
+	return periods
+
+
 def execute(filters=None):
 	if not filters:
 		filters = {}
 
+	# Note: period filter is deprecated - we now use dynamic dates from GL entries
 	period = filters.get("budget_period", "งบ 69-70")
 
 	PERIOD_SHIFT = {
@@ -87,6 +223,7 @@ def execute(filters=None):
 		"NP",
 	]
 
+	# Keep these as fallback in case no GL entries exist
 	cycle_dates = {
 		"AS": ("2025-11-15", "2027-11-14"),
 		"WI": ("2024-03-07", "2026-03-06"),
@@ -141,116 +278,170 @@ def execute(filters=None):
 	data = []
 
 	for prof_tag in PROFESSOR_TAGS:
-		if prof_tag not in cycle_dates:
+		# 🔥 NEW LOGIC: ALWAYS fetch from GL first - get actual first transfer date (with month/day)
+		# Get the validity periods from GL entries
+		validity_periods = calculate_validity_periods(prof_tag)
+
+		if not validity_periods:
+			# NO fallback to hardcoded dates - if no GL data, skip this professor
+			frappe.logger().warning(f"[REPORT] {prof_tag}: NO GL entries found, SKIPPING")
 			continue
 
-		base_start = datetime.strptime(cycle_dates[prof_tag][0], "%Y-%m-%d").date()
-		base_end = datetime.strptime(cycle_dates[prof_tag][1], "%Y-%m-%d").date()
-		start_dt = add_years(base_start, shift_year)
-		end_dt = add_years(base_end, shift_year)
+		# 🔥 Show ALL periods for this professor, not just the last one
+		for period_idx, (start_dt, end_dt, trigger_date) in enumerate(validity_periods, 1):
+			frappe.logger().info(
+				f"[REPORT] {prof_tag}: Processing period {period_idx}/{len(validity_periods)}: {start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')} [Triggered by: {trigger_date.strftime('%Y-%m-%d')}]"
+			)
 
-		# -------------------------------------------------------------
-		# 🔥 แก้ไขชื่อ Field: relate_project (ไม่มีตัว d)
-		# -------------------------------------------------------------
-		sql_summary = """
-            SELECT
-                IFNULL(SUM(gle.debit), 0) as total_in,
-                IFNULL(SUM(gle.credit), 0) as total_out,
-                IFNULL(SUM(CASE WHEN src.project_template IN %(t_c1)s THEN gle.credit ELSE 0 END), 0) as val_c1,
-                IFNULL(SUM(CASE WHEN src.project_template IN %(t_c21)s THEN gle.credit ELSE 0 END), 0) as val_c21,
-                IFNULL(SUM(CASE WHEN src.project_template IN %(t_c22)s THEN gle.credit ELSE 0 END), 0) as val_c22,
-                IFNULL(SUM(CASE WHEN src.project_template IN %(t_c3)s THEN gle.credit ELSE 0 END), 0) as val_c3
-            FROM `tabGL Entry` gle
-            LEFT JOIN `tabJournal Entry` je 
-                ON gle.voucher_no = je.name AND gle.voucher_type = 'Journal Entry'
-            LEFT JOIN `tabTravel Expense request` src 
-                ON je.cheque_no = src.name 
-                OR (src.name IS NOT NULL AND je.user_remark LIKE CONCAT('%%', src.name, '%%'))
-            
-            -- 🔥 relate_project
-            LEFT JOIN `tabProject` p
-                ON src.relate_project = p.name
+			# 🔥 INCOME: Query transfers that triggered THIS period (debit on trigger_date)
+			# EXPENSES: Query all credits within the period date range
+			account_pattern = f"%{prof_tag} Travel - IE%"
 
-            WHERE 
-                gle.is_cancelled = 0
-                AND gle.posting_date BETWEEN %(start)s AND %(end)s
-                AND gle.account LIKE '%%Travel - IE' 
-                AND (
-                    p._user_tags LIKE CONCAT('%%,', %(tag)s, ',%%')
-                    OR je._user_tags LIKE CONCAT('%%,', %(tag)s, ',%%')
-                    OR gle.account LIKE CONCAT('%%', %(tag)s, ' Travel%%')
-                )
-        """
+			# Query 1: INCOME - Only on trigger date (money coming in)
+			sql_income = """
+                SELECT
+                    gle.posting_date,
+                    gle.debit,
+                    gle.account
+                FROM `tabGL Entry` gle
+                WHERE 
+                    gle.is_cancelled = 0
+                    AND gle.posting_date = %s
+                    AND gle.debit > 0
+                    AND gle.account LIKE %s
+            """
 
-		sql_history = """
-            SELECT 
-                p.country as country_name, 
-                gle.credit as amount
-            FROM `tabGL Entry` gle
-            LEFT JOIN `tabJournal Entry` je 
-                ON gle.voucher_no = je.name AND gle.voucher_type = 'Journal Entry'
-            LEFT JOIN `tabTravel Expense request` src 
-                ON je.cheque_no = src.name 
-                OR (src.name IS NOT NULL AND je.user_remark LIKE CONCAT('%%', src.name, '%%'))
-            
-            -- 🔥 relate_project
-            LEFT JOIN `tabProject` p
-                ON src.relate_project = p.name
+			income_list = frappe.db.sql(sql_income, (trigger_date, account_pattern), as_dict=1)
 
-            WHERE 
-                gle.is_cancelled = 0
-                AND gle.credit > 0 
-                AND gle.posting_date BETWEEN %(start)s AND %(end)s
-                AND gle.account LIKE '%%Travel - IE'
-                AND (
-                    p._user_tags LIKE CONCAT('%%,', %(tag)s, ',%%')
-                    OR je._user_tags LIKE CONCAT('%%,', %(tag)s, ',%%')
-                    OR gle.account LIKE CONCAT('%%', %(tag)s, ' Travel%%')
-                )
-            ORDER BY gle.posting_date ASC
-        """
+			# Query 2: EXPENSES - Within the validity period (money going out)
+			sql_expenses = """
+                SELECT
+                    gle.posting_date,
+                    src.project_template,
+                    gle.credit,
+                    p.country
+                FROM `tabGL Entry` gle
+                LEFT JOIN `tabJournal Entry` je 
+                    ON gle.voucher_no = je.name AND gle.voucher_type = 'Journal Entry'
+                LEFT JOIN `tabTravel Expense request` src 
+                    ON je.cheque_no = src.name 
+                    OR (src.name IS NOT NULL AND je.user_remark LIKE CONCAT(%s, src.name, %s))
+                LEFT JOIN `tabProject` p
+                    ON src.relate_project = p.name
+                WHERE 
+                    gle.is_cancelled = 0
+                    AND gle.posting_date BETWEEN %s AND %s
+                    AND gle.credit > 0
+                    AND gle.account LIKE %s
+            """
 
-		params = {
-			"tag": prof_tag,
-			"start": start_dt,
-			"end": end_dt,
-			"t_c1": safe_tuple(T_CAT1),
-			"t_c21": safe_tuple(T_CAT21),
-			"t_c22": safe_tuple(T_CAT22),
-			"t_c3": safe_tuple(T_CAT3),
-		}
+			expense_list = frappe.db.sql(
+				sql_expenses,
+				(
+					"%",
+					"%",
+					start_dt,
+					end_dt,  # 🔥 Full period range for expenses
+					account_pattern,
+				),
+				as_dict=1,
+			)
 
-		# รัน Query
-		res_list = frappe.db.sql(sql_summary, params, as_dict=1)
-		res = res_list[0] if res_list else {}
-		history_list = frappe.db.sql(sql_history, params, as_dict=1)
+			frappe.logger().info(
+				f"[REPORT] {prof_tag}: Period {period_idx} - Income on {trigger_date.strftime('%Y-%m-%d')}: {len(income_list)} entries | Expenses {start_dt.strftime('%Y-%m-%d')}-{end_dt.strftime('%Y-%m-%d')}: {len(expense_list)} entries"
+			)
 
-		total_in = res.get("total_in") or 0
-		total_out = res.get("total_out") or 0
+			# Process results
+			total_in = 0
+			total_out = 0
+			val_c1 = 0
+			val_c21 = 0
+			val_c22 = 0
+			val_c3 = 0
+			history_list = []
 
-		row = {
-			"professor": prof_tag,
-			"cycle_period": f"{start_dt.strftime('%d/%m/%y')} - {end_dt.strftime('%d/%m/%y')}",
-			"budget": total_in,
-			"used_total": total_out,
-			"used_c1": res.get("val_c1") or 0,
-			"used_c21": res.get("val_c21") or 0,
-			"used_c22": res.get("val_c22") or 0,
-			"used_c3": res.get("val_c3") or 0,
-			"balance": total_in - total_out,
-		}
+			# Add income
+			for entry in income_list:
+				total_in += entry.get("debit") or 0
 
-		for i in range(5):
-			field_name = f"trip_{i + 1}"
-			if i < len(history_list):
-				rec = history_list[i]
-				c_name = rec.get("country_name") or "ไม่ระบุ"
-				amt = flt(rec.get("amount"))
-				row[field_name] = f"{c_name}: {amt:,.0f}"
-			else:
-				row[field_name] = ""
+			# Add expenses and categorize
+			for entry in expense_list:
+				credit = entry.get("credit") or 0
+				total_out += credit
 
-		data.append(row)
+				template = entry.get("project_template") or ""
+
+				if template in T_CAT1:
+					val_c1 += credit
+				elif template in T_CAT21:
+					val_c21 += credit
+				elif template in T_CAT22:
+					val_c22 += credit
+				elif template in T_CAT3:
+					val_c3 += credit
+
+				# Add to history if it has credit
+				if credit > 0:
+					history_list.append(entry)
+
+			# Sort history by posting date
+			history_list.sort(key=lambda x: x.get("posting_date") or "")
+
+			# Log summary for this professor
+			frappe.logger().info(
+				f"[REPORT] {prof_tag}: Summary - In: {total_in:,.2f} | Out: {total_out:,.2f} | Balance: {total_in - total_out:,.2f}"
+			)
+			frappe.logger().info(
+				f"[REPORT] {prof_tag}: Categories - C1: {val_c1:,.2f} | C2.1: {val_c21:,.2f} | C2.2: {val_c22:,.2f} | C3: {val_c3:,.2f}"
+			)
+
+			row = {
+				"professor": prof_tag,
+				"cycle_period": f"{start_dt.strftime('%d/%m/%y')} - {end_dt.strftime('%d/%m/%y')}",
+				"budget": total_in,
+				"used_total": total_out,
+				"used_c1": val_c1,
+				"used_c21": val_c21,
+				"used_c22": val_c22,
+				"used_c3": val_c3,
+				"balance": total_in - total_out,
+			}
+
+			for i in range(5):
+				field_name = f"trip_{i + 1}"
+				if i < len(history_list):
+					rec = history_list[i]
+					c_name = rec.get("country") or "ไม่ระบุ"
+					amt = flt(rec.get("credit") or 0)
+					row[field_name] = f"{c_name}: {amt:,.0f}"
+				else:
+					row[field_name] = ""
+
+			data.append(row)
+
+	# Log final summary
+	frappe.logger().info("\n" + "=" * 100)
+	frappe.logger().info("DASHBOARD SUMMARY REPORT - FINAL VERIFICATION")
+	frappe.logger().info("=" * 100)
+	frappe.logger().info(f"Total Professors: {len(data)}")
+	frappe.logger().info(f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+	frappe.logger().info("\nProfessor Summary:")
+	frappe.logger().info(
+		f"{'Tag':<10} {'Period Start':<15} {'Period End':<15} {'Budget':<15} {'Used':<15} {'Balance':<15}"
+	)
+	frappe.logger().info("-" * 100)
+	for row in data:
+		tag = row.get("professor", "")
+		period = row.get("cycle_period", "").split(" - ")
+		start = period[0] if len(period) > 0 else "N/A"
+		end = period[1] if len(period) > 1 else "N/A"
+		budget = row.get("budget", 0)
+		used = row.get("used_total", 0)
+		balance = row.get("balance", 0)
+		frappe.logger().info(
+			f"{tag:<10} {start:<15} {end:<15} {budget:<15,.2f} {used:<15,.2f} {balance:<15,.2f}"
+		)
+	frappe.logger().info("=" * 100 + "\n")
 
 	chart = {
 		"data": {
