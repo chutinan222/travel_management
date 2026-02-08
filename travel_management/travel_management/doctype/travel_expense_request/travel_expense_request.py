@@ -10,6 +10,33 @@ class TravelExpenserequest(Document):
 		if self.instructor:
 			self.title = self.instructor
 
+	def get_instructor_balance(self, instructor_account):
+		"""
+		ดึง balance ปัจจุบันของบัญชีอาจารย์
+		Balance = sum of credits - sum of debits (ไม่รวมวันที่อนาคต)
+		"""
+		if not instructor_account:
+			return 0
+
+		sql = """
+			SELECT
+				COALESCE(SUM(CASE WHEN credit > 0 THEN credit ELSE 0 END), 0) as total_credit,
+				COALESCE(SUM(CASE WHEN debit > 0 THEN debit ELSE 0 END), 0) as total_debit
+			FROM `tabGL Entry`
+			WHERE
+				is_cancelled = 0
+				AND posting_date <= CURDATE()
+				AND account = %s
+		"""
+
+		result = frappe.db.sql(sql, (instructor_account,), as_dict=1)
+
+		if result:
+			balance = result[0].get("total_credit", 0) - result[0].get("total_debit", 0)
+			return max(0, balance)  # Return 0 if balance is negative
+
+		return 0
+
 	def on_submit(self):
 		# ทำงานทันทีเมื่อกด Submit
 		# ตรวจสอบว่าเคยสร้าง JE ไปแล้วหรือยัง ป้องกันการสร้างซ้ำ
@@ -45,8 +72,17 @@ class TravelExpenserequest(Document):
 		# ⚠️ สำคัญมาก: ชื่อ Account ในเครื่องหมาย "" ต้องมีอยู่จริงในระบบ!
 
 		if self.from_template == "Debt Template":
-			# === กรณีที่ 1: ตั้งหนี้ (Debt Template - 2 ขา) ===
-			# ขา Credit: บัญชีเจ้าหนี้/ลูกหนี้ (ชื่ออาจารย์)
+			# === Template 1: Debt Template - ตั้งหนี้ (2 ขา) ===
+			# ทำการตั้งหนี้เมื่ออาจารย์เบิกจากระบบ
+			# เพื่อติดตามว่าอาจารย์เบิกเงินไปเท่าไร
+			#
+			# Journal Entry:
+			#   Cr. บัญชีอาจารย์ (ลูกหนี้ / บัญชีเบิกเงิน)
+			#   Dr. IE Travel Debt - IE (บัญชีหนี้ระบบ)
+			#
+			# ผลลัพธ์: บัญชีอาจารย์ + amt (เพิ่มยอดหนี้)
+
+			# ขา 1: Credit บัญชีอาจารย์ (ตั้งหนี้)
 			accounts.append(
 				{
 					"account": self.instructor,
@@ -56,7 +92,7 @@ class TravelExpenserequest(Document):
 					"company": company,
 				}
 			)
-			# ขา Debit: บัญชีพักหนี้/ค่าใช้จ่าย
+			# ขา 2: Debit IE Travel Debt - IE (บัญชีหนี้ระบบ)
 			accounts.append(
 				{
 					"account": "IE Travel Debt - IE",  # ⚠️ เช็คชื่อบัญชี
@@ -68,10 +104,19 @@ class TravelExpenserequest(Document):
 			)
 
 		elif self.from_template == "Travel Template":
-			# === กรณีที่ 2: เคลียร์ยอด (Travel Template - 4 ขา) ===
-			# ✅ แก้ไขให้ตรงตามภาพที่ 1 ที่ผู้ใช้ต้องการ
+			# === Template 2: Travel Template - เคลียร์และหัก (4 ขา) ===
+			# ทำการหักค่าใช้จ่ายจากเงินที่เบิก และล้างหนี้
+			# นำเงินสดออกจากระบบและบันทึกค่าใช้จ่าย
+			#
+			# Journal Entry:
+			#   Cr. บัญชีอาจารย์ (หักเงิน)
+			#   Dr. Travel Expenses - IE (ค่าใช้จ่าย)
+			#   Cr. IE Travel Money - IE (เงินสดลด)
+			#   Dr. IE Travel Debt - IE (ล้างหนี้)
+			#
+			# ผลลัพธ์: บัญชีอาจารย์ = 0, ค่าใช้จ่ายขึ้น, เงินสดลด, หนี้ล้าง
 
-			# 1. Cr. บัญชีอาจารย์ (เพื่อล้างลูกหนี้)
+			# ขา 1: Credit บัญชีอาจารย์ (หักเงิน)
 			accounts.append(
 				{
 					"account": self.instructor,
@@ -81,7 +126,7 @@ class TravelExpenserequest(Document):
 					"company": company,
 				}
 			)
-			# 2. Dr. ค่าใช้จ่ายเดินทาง (Travel Expenses)
+			# ขา 2: Debit Travel Expenses - IE (บันทึกค่าใช้จ่าย)
 			accounts.append(
 				{
 					"account": "Travel Expenses - IE",  # ⚠️ เช็คชื่อบัญชี
@@ -91,7 +136,7 @@ class TravelExpenserequest(Document):
 					"company": company,
 				}
 			)
-			# 3. Cr. เงินสด/ธนาคาร (IE Travel Money - จ่ายเงินออก)
+			# ขา 3: Credit IE Travel Money - IE (เงินสด/ธนาคารลด)
 			accounts.append(
 				{
 					"account": "IE Travel Money - IE",  # ⚠️ เช็คชื่อบัญชี
@@ -101,12 +146,78 @@ class TravelExpenserequest(Document):
 					"company": company,
 				}
 			)
-			# 4. Dr. บัญชีพักหนี้/ตั้งหนี้ (IE Travel Debt - ล้างยอดตั้งหนี้)
+			# ขา 4: Debit IE Travel Debt - IE (ล้างอัตหนี้)
 			accounts.append(
 				{
 					"account": "IE Travel Debt - IE",  # ⚠️ เช็คชื่อบัญชี
 					"debit_in_account_currency": amt,
 					"credit_in_account_currency": 0,
+					"cost_center": cost_center,
+					"company": company,
+				}
+			)
+
+		elif self.from_template == "return money to system":
+			# === Template 3: Return Money to System - เบิกเงินคืนระบบ (2 ขา) ===
+			# เมื่ออาจารย์คืนเงินที่เบิกมาแล้ว ระบบจะ Reset บัญชีอาจารย์เป็น 0
+			# ล้างทั้งหนี้และจำนวนเงินที่ทำการเบิก
+			#
+			# Journal Entry:
+			#   Cr. บัญชีอาจารย์ (หักเงินคืนทั้งหมด)
+			#   Dr. IE Travel Debt - IE (ล้างหนี้)
+			#
+			# ผลลัพธ์: บัญชีอาจารย์ = 0 (รีเซ็ตเป็นศูนย์)
+			#         หนี้ระบบล้าง = 0
+
+			# ขา 1: Credit บัญชีอาจารย์ (หักเงินคืน = รีเซ็ตบัญชี)
+			accounts.append(
+				{
+					"account": self.instructor,
+					"credit_in_account_currency": amt,
+					"debit_in_account_currency": 0,
+					"cost_center": cost_center,
+					"company": company,
+				}
+			)
+			# ขา 2: Debit IE Travel Debt - IE (ล้างหนี้ระบบ)
+			accounts.append(
+				{
+					"account": "IE Travel Debt - IE",  # ⚠️ เช็คชื่อบัญชี
+					"debit_in_account_currency": amt,
+					"credit_in_account_currency": 0,
+					"cost_center": cost_center,
+					"company": company,
+				}
+			)
+
+		elif self.from_template == "เงินเข้า 120000":
+			# === Template 4: Budget In 120000 - เงินเข้า (2 ขา) ===
+			# ทำการบันทึกเมื่อเงินอุดหนุนเข้า
+			# จำนวนเงินจะตามที่กรอกใน Travel Amount (อาจไม่ใช่ 120,000 ตรงๆ)
+			#
+			# Journal Entry:
+			#   Dr. บัญชีอาจารย์ (เงินเข้า)
+			#   Cr. IE Travel Debt - IE (บัญชีหนี้)
+			#
+			# ผลลัพธ์: บัญชีอาจารย์ + amt (ยอดเงินเข้า)
+			#         หนี้ระบบ - amt (ลดลง)
+
+			# ขา 1: Debit บัญชีอาจารย์ (เงินเข้า)
+			accounts.append(
+				{
+					"account": self.instructor,
+					"debit_in_account_currency": amt,
+					"credit_in_account_currency": 0,
+					"cost_center": cost_center,
+					"company": company,
+				}
+			)
+			# ขา 2: Credit IE Travel Debt - IE (หักหนี้ระบบ)
+			accounts.append(
+				{
+					"account": "IE Travel Debt - IE",  # ⚠️ เช็คชื่อบัญชี
+					"credit_in_account_currency": amt,
+					"debit_in_account_currency": 0,
 					"cost_center": cost_center,
 					"company": company,
 				}

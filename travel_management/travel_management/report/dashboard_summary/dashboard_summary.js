@@ -21,8 +21,8 @@ frappe.query_reports["Dashboard summary"] = {
 
         for (let y = start_year; y < end_year; y++) {
             let next_y = y + 1;
-            let thai_year_start = y - 1954;  // Convert back to Thai year for display
-            let thai_year_end = next_y - 1954;
+            let thai_year_start = y - 1957;  // Convert to Thai year (2023 = 66)
+            let thai_year_end = next_y - 1957;
             let p_name = `${y}-${next_y} (งบ ${thai_year_start}-${thai_year_end})`;
             options_str += p_name + "\n";
         }
