@@ -128,6 +128,20 @@ def execute(filters=None):
 		{"label": "ครั้งที่ 5", "fieldname": "trip_5", "fieldtype": "Data", "width": 140},
 	]
 
+	# ⭐ Parse budget_period filter to get year range
+	# Format: "2025-2026 (68-69)" or "All Years"
+	filter_start_year = None
+	filter_end_year = None
+	
+	if filters:
+		budget_period = filters.get("budget_period", "All Years")
+		if budget_period and budget_period != "All Years":
+			# Parse format "2025-2026 (68-69)"
+			year_match = re.match(r"(\d{4})-(\d{4})", budget_period)
+			if year_match:
+				filter_start_year = int(year_match.group(1))
+				filter_end_year = int(year_match.group(2))
+
 	data = []
 
 	for prof_tag in PROFESSOR_TAGS:
@@ -141,6 +155,15 @@ def execute(filters=None):
 		account_exact = f"{prof_tag} Travel - IE"
 
 		for start_dt, end_dt, trigger_date in validity_periods:
+			# ⭐ Filter by budget period (year range)
+			# If filter is set, skip cycles outside the selected year range
+			if filter_start_year and filter_end_year:
+				cycle_start_year = start_dt.year
+				# Check if cycle falls within selected fiscal year range
+				# Cycle should start in or between filter_start_year and filter_end_year
+				if not (filter_start_year <= cycle_start_year <= filter_end_year):
+					continue
+
 			# 1. หาเงินเข้า (Budget) - only from trigger date
 
 			sql_income = """
