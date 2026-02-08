@@ -42,9 +42,9 @@ frappe.query_reports["Dashboard summary"] = {
             let $filter = report.page.fields_dict['budget_period'].$wrapper;
             if ($filter) {
                 $filter.find('select, .form-control').css({
-                    'background-color': '#ffdfe4',
+                    'background-color': '#fbfdff',
                     'border-color': '#000000',
-                    'color': '#8B0045'
+                    'color': '#00078b'
                 });
             }
         }, 100);
