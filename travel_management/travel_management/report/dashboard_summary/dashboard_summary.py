@@ -76,6 +76,31 @@ def calculate_periods_by_budget(tag):
 
 # =========================================================
 
+# API: Get Professor Tags for Filter
+
+# =========================================================
+
+
+@frappe.whitelist()
+def get_professor_tags():
+	"""Return list of professor tags for filter dropdown"""
+	sql_get_tags = """
+        SELECT DISTINCT 
+            SUBSTRING_INDEX(account, ' ', 1) as tag
+        FROM `tabGL Entry`
+        WHERE 
+            is_cancelled = 0
+            AND posting_date <= CURDATE()
+            AND account LIKE '% Travel - IE%'
+            AND SUBSTRING_INDEX(account, ' ', 1) != 'IE'
+        ORDER BY tag ASC
+    """
+	tag_results = frappe.db.sql(sql_get_tags, as_dict=1)
+	return [row.get("tag") for row in tag_results if row.get("tag")]
+
+
+# =========================================================
+
 # MAIN REPORT
 
 # =========================================================
@@ -110,6 +135,13 @@ def execute(filters=None):
 
 	PROFESSOR_TAGS = [row.get("tag") for row in tag_results if row.get("tag")]
 
+	# ⭐ Filter by professor tag if selected
+	filter_professor = None
+	if filters:
+		filter_professor = filters.get("professor_tag")
+		if filter_professor and filter_professor != "ทั้งหมด":
+			PROFESSOR_TAGS = [tag for tag in PROFESSOR_TAGS if tag == filter_professor]
+
 	columns = [
 		{"label": "อาจารย์ (Tag)", "fieldname": "professor", "fieldtype": "Data", "width": 100},
 		{"label": "รอบวันที่", "fieldname": "cycle_period", "fieldtype": "Data", "width": 180},
@@ -132,7 +164,7 @@ def execute(filters=None):
 	# Format: "2025-2026 (68-69)" or "All Years"
 	filter_start_year = None
 	filter_end_year = None
-	
+
 	if filters:
 		budget_period = filters.get("budget_period", "All Years")
 		if budget_period and budget_period != "All Years":
