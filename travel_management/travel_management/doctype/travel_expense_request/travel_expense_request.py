@@ -69,7 +69,7 @@ class TravelExpenserequest(Document):
 		accounts = []
 
 		# --- 2. ส่วนกำหนดขาบัญชีตาม Template ที่เลือก ---
-		# ⚠️ สำคัญมาก: ชื่อ Account ในเครื่องหมาย "" ต้องมีอยู่จริงในระบบ!
+		
 
 		if self.from_template == "Debt Template":
 			# === Template 1: Debt Template - ตั้งหนี้ (2 ขา) ===

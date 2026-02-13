@@ -32,16 +32,25 @@ frappe.query_reports["Dashboard summary"] = {
                     font-size: 13px;
                     line-height: 1.4;
                 ">
-                    <div style="font-weight: bold; color: #171307; margin-bottom: 6px; font-size: 14px;">
+                    <div style="font-weight: bold; color: #171307;
+                     margin-bottom: 6px; font-size: 14px;">
                         กรณีการใช้ Template:
                     </div>
                     <div style="color: #0f0e0b;">
-                        <strong style="color: #303a71;">กรณีที่ 1:</strong> Template ในประเทศ (เบิกภาค)<br>
-                        <strong style="color: #303a71;">กรณีที่ 2.1:</strong> Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน อยู่ในฐาน Scopus<br>
-                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน (ขอทุนคณะ/มช.)<br>
-                        <strong style="color: #303a71;">กรณีที่ 2.2:</strong> Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน ไม่เกิน 60,000 ไม่อยู่ในฐาน Scopus<br>
-                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน เกิน 60,000 ไม่อยู่ในฐาน Scopus<br>
-                        <strong style="color: #303a71;">กรณีที่ 3:</strong> Template ต่างประเทศ (เบิกภาค) ไม่นำเสนอผลงาน ไม่เกิน 40,000 บาท
+                        <strong style="color: #303a71;">กรณีที่ 1:
+                        </strong> Template ในประเทศ (เบิกภาค)<br>
+                        <strong style="color: #303a71;">กรณีที่ 2.1:
+                        </strong> Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน อยู่ในฐาน Scopus<br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                        &nbsp;&nbsp;Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน (ขอทุนคณะ/มช.)<br>
+                        <strong style="color: #303a71;">กรณีที่ 2.2:
+                        </strong> Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน ไม่เกิน 60,000 ไม่อยู่ในฐาน Scopus<br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                        Template ต่างประเทศ (เบิกภาค) นำเสนอผลงาน เกิน 60,000 ไม่อยู่ในฐาน Scopus<br>
+                        <strong style="color: #303a71;">กรณีที่ 3:
+                        </strong> Template ต่างประเทศ (เบิกภาค) ไม่นำเสนอผลงาน ไม่เกิน 40,000 บาท
                     </div>
                 </div>
             `;
