@@ -46,23 +46,21 @@ def execute(filters=None):
 			instructor_filter = filters.get("instructor_name")
 			# Get employee IDs that match the middle_name
 			matching_employees = frappe.get_all(
-				"Employee",
-				filters={"middle_name": instructor_filter},
-				fields=["name"]
+				"Employee", filters={"middle_name": instructor_filter}, fields=["name"]
 			)
 			matching_ids = [emp["name"] for emp in matching_employees]
-			
+
 			# Check if instructor is in either authors or professors
 			author_list = [a["teacher_name"] for a in authors if a.get("teacher_name")]
 			professor_list = [p["professor_name"] for p in professors if p.get("professor_name")]
-			
+
 			# Check if any matching employee is in the lists
 			found = False
 			for emp_id in matching_ids:
 				if emp_id in author_list or emp_id in professor_list:
 					found = True
 					break
-			
+
 			if not found:
 				continue
 
@@ -121,7 +119,7 @@ def get_employee_list(doctype, txt, searchfield, start, page_len, filters):
 	"""Return employee list with middle_name for filter dropdown"""
 	# Add "All" option at the start
 	result = [["", "All"]]
-	
+
 	employees = frappe.get_all(
 		"Employee",
 		filters={
@@ -131,19 +129,20 @@ def get_employee_list(doctype, txt, searchfield, start, page_len, filters):
 		limit_start=start,
 		limit_page_length=page_len,
 	)
-	
+
 	# Filter by search text (search in middle_name)
 	if txt:
 		employees = [
-			emp for emp in employees
+			emp
+			for emp in employees
 			if txt.lower() in (emp.get("middle_name") or "").lower()
 			or txt.lower() in emp.get("name", "").lower()
 		]
-	
+
 	# Format for dropdown display - show only middle_name
 	for emp in employees:
 		middle_name = emp.get("middle_name") or ""
 		if middle_name:  # Only add if middle_name exists
 			result.append([middle_name, middle_name])
-	
+
 	return result
