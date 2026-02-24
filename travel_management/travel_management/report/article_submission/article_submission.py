@@ -76,8 +76,6 @@ def execute(filters=None):
 		)
 
 	return columns, data
-
-
 def build_column():
 	column = [
 		{
@@ -112,7 +110,6 @@ def build_column():
 		},
 	]
 	return column
-
 
 @frappe.whitelist()
 def get_employee_list(doctype, txt, searchfield, start, page_len, filters):

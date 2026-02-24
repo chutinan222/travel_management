@@ -10,7 +10,7 @@
     "idx": 0,
     "is_standard": "Yes",
     "letter_head": null,
-    "modified": "2026-02-09 12:36:57.260096",
+    "modified": "2026-02-24 10:56:29.078235",
     "modified_by": "Administrator",
     "module": "travel_management",
     "name": "Article Submission",
@@ -31,6 +31,12 @@
         },
         {
             "role": "Employee Self Service"
+        },
+        {
+            "role": "Administrator"
+        },
+        {
+            "role": "System Manager"
         }
     ],
     "timeout": 0
