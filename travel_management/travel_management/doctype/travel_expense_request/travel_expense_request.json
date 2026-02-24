@@ -127,7 +127,7 @@
     "index_web_pages_for_search": 1,
     "is_submittable": 1,
     "links": [],
-    "modified": "2026-02-24 10:54:39.354453",
+    "modified": "2026-02-24 11:02:46.059319",
     "modified_by": "Administrator",
     "module": "travel_management",
     "name": "Travel Expense request",
@@ -156,6 +156,18 @@
             "read": 1,
             "report": 1,
             "role": "Administrator",
+            "share": 1,
+            "write": 1
+        },
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "export": 1,
+            "print": 1,
+            "read": 1,
+            "report": 1,
+            "role": "Academics User",
             "share": 1,
             "write": 1
         }

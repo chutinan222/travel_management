@@ -10,7 +10,7 @@
     "idx": 0,
     "is_standard": "Yes",
     "letter_head": null,
-    "modified": "2026-02-24 10:56:29.078235",
+    "modified": "2026-02-24 11:03:42.041516",
     "modified_by": "Administrator",
     "module": "travel_management",
     "name": "Article Submission",
@@ -37,6 +37,9 @@
         },
         {
             "role": "System Manager"
+        },
+        {
+            "role": "Academics User"
         }
     ],
     "timeout": 0
